@@ -218,3 +218,36 @@ def run_trivy(target_path: str) -> list[dict]:
 
     print(f" Truvy encontrou {len(findings)} issue(s)")
     return findings
+
+# Consolidação, relatório e decisão de build
+
+def summarize(findings: list[dict]) -> dict:
+    summary = {"CRITICAL": 0, "HIGH": 0, "MEDIUM": 0, "LOW": 0}
+    for f in findings:
+        summary[f["severity"]] = summary.get(f["severity"], 0) + 1
+        return summary
+
+def print_summary(findings: list[dict], summary: dict, fail_on: str) -> None:
+    print(f"\n{BOLD}{'=' * 60}{RESET}")
+    print(f"{BOLD}RESUMO DA ANÁLISE DE SEGURANÇA{RESET}")
+    print(f"{'=' * 60}")
+    print(f" {RED}CRITICAL: {summary['CRITICAL']}{RESET}")
+    print(f" {RED}HIGH: {summary['HIGH']}{RESET}")
+    print(f" {YELLOW}MEDIUM: {summary['MEDIUM']}{RESET}")
+    print(f" LOW: {summary['LOW']}")
+    print(f" Total: {len(findings)}")
+    print(f" Limiar de falha (--fail-on): {fail_on}")
+    print(f"{'=' * 60}\n")
+
+    #Lista as vulnerabilidades acima do limiar para facilitar o debug no CI
+    threshold = SEVERITY_ORDER[fail_on]
+    blocking = [f for f in findings if SEVERITY_ORDER[f["severity"]] >= threshold]
+    if blocking:
+        print(f"{BOLD}{RED}Vulnerabilidaes bloqueantes:{RESET}")
+        for f in blocking:
+            location = f.get("file") or f.get("package") or f.gt("target") or "-"
+            line = f":{f['line']}" if f.get("line") else ""
+            print(f" [{f['severity']}] ({f['tool']}) {f.get('id,' '-')}"
+                  f"- {f.get('title', '-')} -> {location}{line}")
+        print()
+
