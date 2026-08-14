@@ -110,3 +110,52 @@ def run_bandit(target_path: str) -> list[dict]:
 
     print(f" Bandit find {len(findings)} issue(s)")
     return findings
+
+# SCA - pip-audit (busca por vulnerabilidades em dependências Python / CVEs conhecidas)
+
+def run_pip_audit(target_path: str) -> list[dict]:
+    """Roda o pip-audit contra o requirements.txt e normaliza os resultados"""
+
+    print(f"{BOLD} [2/3] Executando pip-audit (SCA - dependências) . . .{RESET}")
+
+    if not tool_available("pip-audit"):
+        print(f"{YELLOW} pip-audit não instalado - pulando (pip install pip-audit).{RESET}")
+        return []
+
+    req_file = os.path.join(target_path, "requirements.txt")
+    if not os.path.exists(req_file):
+        print(f"{YELLOW} requirements.txt não encontrado em {target_path} - pulando pip-audit.{RESET}")
+        return []
+
+    code, stdout, stderr = run_command(
+        ["pip-audit", "-r", req_file, "-f", "json", "--disable-pip"]
+    )
+
+    if code not in (0, 1):
+        print(f"{RED} Erro ao executar pip-audit: {stderr}{RESET}")
+        return []
+
+    try:
+        data = json.loads(stdout)
+    except json.JSONDecodeError:
+        print(f"{RED} Falha ao interpretar JSON do pip-audit{RESET}")
+        return []
+
+    findings = []
+    for dep in data.get("dependencies", []):
+        for vuln in dep.get("vulns", []):
+            findings.append({
+                "tool": "pip-audit",
+                "type": "SCA",
+                "severity": "HIGH",
+                "id": vuln.get("id"),
+                "title": f"{dep.get('name')} {dep.get('version')} vulneravel",
+                "description": (vuln.get("description") or "")[:300],
+                "package": dep.get("name"),
+                "installed_version": dep.get("version"),
+                "fix_versions": vuln.get("fix_versions, []"),
+                "aliases": vuln.get("aliases", []),
+            })
+
+    print(f" pip-audit find {len(findings)} issue(s)")
+    return findings
