@@ -251,3 +251,15 @@ def print_summary(findings: list[dict], summary: dict, fail_on: str) -> None:
                   f"- {f.get('title', '-')} -> {location}{line}")
         print()
 
+def write_report(findings: list[dict], summary: dict, output: str, fail_on: str, passed: bool) -> None:
+    report = {
+        "scan_date": datetime.now(timezone.utc). isoformat(),
+        "fail_on_threshold": fail_on,
+        "passed": passed,
+        "summary": summary,
+        "total_findings": len(findings),
+        "findings": findings,
+    }
+    with open(output, "w", encoding="utf-8") as fh:
+        json.dump(report, fh, indent=2, ensure_ascii=False)
+    print(f"Relatorio salvo em: {output}")
