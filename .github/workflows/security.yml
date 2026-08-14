@@ -1,0 +1,60 @@
+name: Security Scan (DevSecOps)
+
+# Roda em todo push e pull request para main da pipeline
+on:
+    push:
+        branches: [main]
+    pull_request:
+        branches: [main]
+    workflow_dispatch: {} #permite rodar manualmente pela aba Actions
+
+permissions:
+    contents: read
+
+jobs:
+    security-scan:
+        name: SAST + SCA Scan
+        runs-on: ubuntu-latest
+
+        steps:
+            # baixa o código do repositorio
+            - name: Checkout do código
+              uses: actions/checkout@v4
+
+              # configura o python
+            - name: Configurar Python
+              uses: actions/setup-python@v5
+              with:
+                python-version: "3.12"
+            
+            # instala as ferramentas de analise
+            - name: Instalar ferramentas de segurança
+              run: |
+                python -m pip install --upgrade pip
+                pip install bandit pip-audit
+            
+            # instala o trivy
+            - name: Instalar Trivy
+              run: |
+                curl -sfL https://raw.githubusercontent.com/aquasecurity/trivy/main/contrib/install.sh \
+                | sh -s -- -b /usr/local/bin
+
+            # executa o scanner automatizado
+            # se tem vulnerabilidade >= HIGH, o script retorna exit 1
+            # e o GitHub Actions marca a build como FALHA automaticamente.
+            - name: Executar scanner de vulnerabilidades
+              run: |
+                python scanner/security_scan.py \
+                    --path . \
+                    --fail-on HIGH \
+                    --report security_report.json
+            
+            # publica o relatorio como artefato mesmo se a build falhar
+            - name: Upload do relatório de segurança
+              if: always()
+              uses: actions/upload-artifact@v4
+              with:
+                name: security-report
+                path: security_report.json
+                retention-days: 30
+                
