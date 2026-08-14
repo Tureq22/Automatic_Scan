@@ -159,3 +159,62 @@ def run_pip_audit(target_path: str) -> list[dict]:
 
     print(f" pip-audit find {len(findings)} issue(s)")
     return findings
+
+
+# SCA/Container - Trivy (filesystem, dependencias e segredos)
+
+def run_trivy(target_path: str) -> list[dict]:
+    """Roda o Trivy em modo filesystem e normaliza os resultados"""
+    print(f"{BOLD} [3/3] Executando Trivy (SCA/secrets/filesystem) . . .{RESET}")
+
+    if not tool_available("trivy"):
+        print(f"{YELLOW} Trivy não instalado - pulando (ver README para instalação).{RESET}")
+        return []
+
+    code, stdout, stderr = run_command(
+        ["trivy", "fs", "--format", "json", "--quiet",
+         "--scanners", "vuln,secret", target_path]
+    )
+
+    if code not in (0, 1):
+        print(f"{RED} Erro ao executar Trivy: {stderr}{RESET}")
+        return []
+
+    try:
+        data = json.loads(stdout)
+    except json.JSONDecodeError:
+        print(f"{RED} Falha ao interpretar JSON do Trivy{RESET}")
+        return []
+
+    findings = []
+    for result in data.get("Results", []) or []:
+        # Vulnerabilidades em dependências
+        for vuln in result.get("Vulnerabilities", []) or []:
+            findings.append({
+                "tool": "trivy",
+                "type": "SCA",
+                "severity": normalize_severity(vuln.get("Severity")),
+                "id": vuln.get("VulnerabilityID"),
+                "title": vuln.get("Title") or vuln.get("VulnerabilityID"),
+                "description": (vuln.get("Description") or "")[:300],
+                "package": vuln.get("PkgName"),
+                "installed_version": vuln.get("InstalledVersion"),
+                "fixed_version": vuln.get("FixedVersion"),
+                "target": result.get("Target"),
+            })
+
+        # Segredos vazados no código (chaves de API, senhas, tokens)
+        for secret in result.get("Secrets", []) or []:
+            findings.append({
+                "tool": "trivy",
+                "type": "SECRET",
+                "severity": normalize_severity(secret.get("Severity")),
+                "id": secret.get("RuleID"),
+                "title": secret.get("Title"),
+                "description": "Possivel segredo/credencial exposto no código",
+                "file": secret.get("Target"),
+                "line": secret.get("StartLine"),
+            })
+
+    print(f" Truvy encontrou {len(findings)} issue(s)")
+    return findings
