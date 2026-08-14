@@ -17,6 +17,7 @@ Exit codes:
 import argparse
 import json
 import os
+import shutil
 import subprocess
 import sys
 from datetime import datetime, timezone
@@ -47,7 +48,7 @@ def run_command(cmd: list[str]) -> tuple[int, str, str]:
     except subprocess.TimeoutExpired:
         return 124, "", f"Timeout expirado para o comando: {' '.join(cmd)}"
 
-def tool_available(name; str) -> bool:
+def tool_available(name: str) -> bool:
     return shutil.which(name) is not None
 
 def normalize_severity(raw: str) -> str:
