@@ -70,3 +70,42 @@ def normalize_severity(raw: str) -> str:
 def run_bandit(target_path: str) -> list[dict]:
     """Roda o Bandit e retorna uma lista de finding normalizados"""
     print(f"{BOLD} [1/3] Executando Bandit (SAST) . . .{RESET}")
+
+    if not tool_available("bandit"):
+        print(f"{YELLOW}Bandit não instalado - pulando (pip install bandit).{RESET}")
+        return []
+
+    code, stdout, stderr = run_command(
+        ["bandit", "-r", target_path, "-f", "json", "-q",
+         "--exclude", "./venv,./.venv,./node_modules,./.git"]
+    )
+
+    # Bandit retorna 1 quando encontra issues - isso é esperado, não é erro
+    if code not in (0, 1):
+        print(f"{RED} Erro ao executar Bandit: {stderr}{RESET}")
+        return []
+
+    try:
+        data = json.loads(stdout)
+    except json.JSONDecodeError:
+        print(f"{RED} Falha ao interpretar JSON do Bandit{RESET}")
+        return []
+
+    findings = []
+    for issue in data.get("results", []):
+        findings.append({
+            "tool": "bandit",
+            "type": "SAST",
+            "severity": normalize_severity(issue.get("issue_severity")),
+            "confidence": issue.get("issue_confidence"),
+            "id": issue.get("test_id"),
+            "title": issue.get("test_name"),
+            "description": issue.get("issue_text"),
+            "file": issue.get("filename"),
+            "line": issue.get("line_number"),
+            "cwe": (issue.get("issue_cwe") or {}).get("id"),
+            "more_info": issue.get("more_info"),
+        })
+
+    print(f" Bandit find {len(findings)} issue(s)")
+    return findings
