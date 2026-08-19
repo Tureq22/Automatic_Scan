@@ -153,7 +153,7 @@ def run_pip_audit(target_path: str) -> list[dict]:
                 "description": (vuln.get("description") or "")[:300],
                 "package": dep.get("name"),
                 "installed_version": dep.get("version"),
-                "fix_versions": vuln.get("fix_versions, []"),
+                "fix_versions": vuln.get("fix_versions", []),
                 "aliases": vuln.get("aliases", []),
             })
 
@@ -212,7 +212,7 @@ def run_trivy(target_path: str) -> list[dict]:
                 "id": secret.get("RuleID"),
                 "title": secret.get("Title"),
                 "description": "Possivel segredo/credencial exposto no código",
-                "file": secret.get("Target"),
+                "file": result.get("Target"),
                 "line": secret.get("StartLine"),
             })
 
@@ -225,7 +225,8 @@ def summarize(findings: list[dict]) -> dict:
     summary = {"CRITICAL": 0, "HIGH": 0, "MEDIUM": 0, "LOW": 0}
     for f in findings:
         summary[f["severity"]] = summary.get(f["severity"], 0) + 1
-        return summary
+
+    return summary
 
 def print_summary(findings: list[dict], summary: dict, fail_on: str) -> None:
     print(f"\n{BOLD}{'=' * 60}{RESET}")
@@ -245,9 +246,9 @@ def print_summary(findings: list[dict], summary: dict, fail_on: str) -> None:
     if blocking:
         print(f"{BOLD}{RED}Vulnerabilidades bloqueantes:{RESET}")
         for f in blocking:
-            location = f.get("file") or f.get("package") or f.gt("target") or "-"
+            location = f.get("file") or f.get("package") or f.get("target") or "-"
             line = f":{f['line']}" if f.get("line") else ""
-            print(f" [{f['severity']}] ({f['tool']}) {f.get('id,' '-')}"
+            print(f" [{f['severity']}] ({f['tool']}) {f.get('id', '-')}"
                   f"- {f.get('title', '-')} -> {location}{line}")
         print()
 
