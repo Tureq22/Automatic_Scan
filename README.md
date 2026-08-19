@@ -1,112 +1,131 @@
-# Scanner Automatizado de Vulnerabilidades em CI/CD (DevSecOps Core)
+Scanner Automatizado de Vulnerabilidades em CI/CD
 
-Pipeline de segurança que executa análise estática de código (SAST, via **Bandit**), análise de dependências (SCA, via **pip-audit** e **Trivy**) e detecção de segredos, consolida tudo em um relatório JSON e **falha a build automaticamente** quando encontra vulnerabilidades acima do limiar configurado.
+Português | English
 
-## Arquitetura
+Mostrar Imagem
 
-```
-push/PR ──> GitHub Actions ──> security_scan.py
-                                   ├── Bandit     (SAST: código Python inseguro)
-                                   ├── pip-audit  (SCA: CVEs em dependências)
-                                   └── Trivy      (SCA + secrets + filesystem)
-                                        │
-                                        ▼
-                            security_report.json
-                                        │
-                          exit 0 (passa) / exit 1 (bloqueia merge)
-```
+Portão de segurança automatizado para pipelines CI/CD. Um orquestrador em Python executa análise estática de código (SAST, via Bandit), análise de dependências (SCA, via pip-audit e Trivy) e detecção de segredos, consolida os resultados em um relatório JSON unificado e falha a build quando encontra vulnerabilidades acima do limiar configurado — impedindo que código inseguro chegue à branch principal.
 
-## Estrutura do projeto
+Arquitetura
+push / pull request
+        │
+        ▼
+  GitHub Actions ──> security_scan.py
+                          ├── Bandit     (SAST: padrões inseguros no código Python)
+                          ├── pip-audit  (SCA: CVEs em dependências, base OSV)
+                          └── Trivy      (SCA + secrets + filesystem)
+                               │
+                               ▼
+                    normalização de severidade
+                               │
+                               ▼
+                     security_report.json
+                               │
+                 exit 0 (aprova) │ exit 1 (bloqueia o merge)
 
-```
-devsecops-scanner/
+O contrato entre o script e o CI é apenas o exit code, o que torna o scanner portável para GitLab CI, Jenkins ou qualquer outra plataforma sem alteração de código.
+
+Exit code	Significado
+0	Nenhuma vulnerabilidade acima do limiar — build aprovada
+1	Vulnerabilidades bloqueantes encontradas — build falha
+2	Erro na execução das ferramentas
+Estrutura do projeto
+.
 ├── .github/workflows/security.yml   # Pipeline do GitHub Actions
 ├── scanner/security_scan.py         # Orquestrador (o coração do projeto)
-├── app/vulnerable_example.py        # Código vulnerável para demonstração
-├── requirements.txt                 # Inclui dependência vulnerável de propósito
+├── requirements.txt                 # Dependências da aplicação
+├── .gitignore
 └── README.md
-```
 
-## Passo a passo
+O arquivo app/vulnerable_example.py, com vulnerabilidades propositais, existe apenas na branch de demonstração demo/vulnerabilidades. A branch main é mantida limpa.
 
-### Fase 1 — Ambiente local
+Uso
+Instalação
+bash
+python -m venv venv
+source venv/bin/activate        # Windows: venv\Scripts\activate
+pip install bandit pip-audit
 
-1. Instale o Python 3.11+ e crie o ambiente virtual:
-   ```bash
-   python -m venv venv
-   source venv/bin/activate        # Windows: venv\Scripts\activate
-   ```
-2. Instale as ferramentas de análise:
-   ```bash
-   pip install bandit pip-audit
-   ```
-3. Instale o Trivy (opcional localmente, obrigatório entender):
-   ```bash
-   # Linux
-   curl -sfL https://raw.githubusercontent.com/aquasecurity/trivy/main/contrib/install.sh | sh -s -- -b /usr/local/bin
-   # macOS
-   brew install trivy
-   # Windows
-   choco install trivy
-   ```
+Trivy (opcional localmente, usado na pipeline):
 
-### Fase 2 — Entender cada ferramenta isoladamente
-
-Antes de automatizar, rode cada uma na mão e leia o JSON de saída. Isso é o que diferencia quem entende do projeto de quem só copiou código:
-
-```bash
-bandit -r app/ -f json | python -m json.tool
-pip-audit -r requirements.txt -f json | python -m json.tool
-trivy fs --format json --scanners vuln,secret .
-```
-
-Observe os campos que o `security_scan.py` extrai: `issue_severity`, `test_id` e `filename` no Bandit; `vulns`, `fix_versions` no pip-audit; `Severity`, `VulnerabilityID` no Trivy.
-
-### Fase 3 — Rodar o scanner localmente
-
-```bash
+bash
+# Linux
+curl -sfL https://raw.githubusercontent.com/aquasecurity/trivy/main/contrib/install.sh | sh -s -- -b /usr/local/bin
+# macOS
+brew install trivy
+# Windows
+choco install trivy
+Execução
+bash
 python scanner/security_scan.py --path . --fail-on HIGH --report security_report.json
-echo $?   # deve retornar 1 (build falhou por causa do código vulnerável)
-```
+Argumento	Padrão	Descrição
+--path	.	Diretório do projeto a analisar
+--fail-on	HIGH	Severidade mínima que falha a build: LOW, MEDIUM, HIGH, CRITICAL
+--report	security_report.json	Caminho do relatório JSON de saída
+--skip	—	Ferramentas a pular: bandit, pip-audit, trivy
+Ferramentas isoladas
 
-Teste as variações:
-```bash
-python scanner/security_scan.py --fail-on CRITICAL      # limiar mais permissivo
-python scanner/security_scan.py --skip trivy            # pular uma ferramenta
-```
+Útil para depurar: se a ferramenta funciona sozinha, o problema está no orquestrador.
 
-### Fase 4 — Subir para o GitHub e ativar a pipeline
+bash
+bandit -r . -f json
+pip-audit -r requirements.txt -f json --no-deps
+trivy fs --format json --scanners vuln,secret .
+Exemplo de saída
 
-1. Crie um repositório no GitHub e envie o projeto:
-   ```bash
-   git init
-   git add .
-   git commit -m "feat: scanner de vulnerabilidades DevSecOps"
-   git branch -M main
-   git remote add origin https://github.com/SEU_USUARIO/devsecops-scanner.git
-   git push -u origin main
-   ```
-2. Vá na aba **Actions** do repositório: o workflow `Security Scan (DevSecOps)` roda automaticamente e deve **falhar** (vermelho) — esse é o comportamento esperado, provando que o portão de segurança funciona.
-3. Baixe o artefato `security-report` na página da execução para ver o JSON completo.
+Rodando contra a branch de demonstração, com requests==2.19.1, flask==0.12.3 e código vulnerável:
 
-### Fase 5 — Demonstrar o ciclo completo (a parte que impressiona)
+============================================================
+RESUMO DA ANÁLISE DE SEGURANÇA
+============================================================
+ CRITICAL: 0
+ HIGH: 29
+ MEDIUM: 2
+ LOW: 5
+ Total: 36
+ Limiar de falha (--fail-on): HIGH
+============================================================
 
-1. Crie uma branch de correção:
-   ```bash
-   git checkout -b fix/vulnerabilidades
-   ```
-2. Corrija as vulnerabilidades: atualize o `requirements.txt` (`requests>=2.32.0`, `flask>=3.0.0`) e corrija/remova o `app/vulnerable_example.py` (use queries parametrizadas, `hashlib.sha256`, `shell=False`, `verify=True`, senha via variável de ambiente).
-3. Abra um Pull Request e veja a pipeline passar (verde). Screenshot do antes/depois é ouro para o portfólio.
-4. Em **Settings > Branches > Branch protection rules**, exija que o check `SAST + SCA Scan` passe antes de permitir merge na `main`. Agora nenhum código vulnerável entra no repositório.
+Vulnerabilidades bloqueantes:
+ [HIGH] (bandit) B602 - subprocess_popen_with_shell_equals_true -> ./app/vulnerable_example.py:23
+ [HIGH] (bandit) B324 - hashlib -> ./app/vulnerable_example.py:28
+ [HIGH] (pip-audit) PYSEC-2023-74 - requests 2.19.1 vulneravel -> requests
+ ...
 
-## Decisões de design (para explicar em entrevista)
+BUILD FALHOU: 29 vulnerabilidade(s) >= HIGH encontrada(s).
 
-- **pip-audit em vez de Safety**: usa a base de dados OSV (Google) e o PyPI Advisory Database, não exige chave de API e é mantido pela PyPA. O Safety passou a exigir conta para uso completo. O script aceita trocar facilmente.
-- **Normalização de severidade**: cada ferramenta usa escalas diferentes (Bandit usa LOW/MEDIUM/HIGH; Trivy inclui CRITICAL e UNKNOWN). O scanner unifica tudo antes de decidir.
-- **Exit codes como contrato**: o GitHub Actions só precisa do código de saída — `0` passa, `1` bloqueia. Isso torna o script portável para GitLab CI, Jenkins ou qualquer CI.
-- **`if: always()` no upload**: o relatório é publicado mesmo quando a build falha, que é exatamente quando ele é mais necessário.
-- **Postura conservadora no SCA**: CVE em dependência sem severidade explícita é tratada como HIGH.
+Cada achado do pip-audit inclui o campo fix_versions, indicando para qual versão atualizar:
 
-## Extensões possíveis
+json
+{
+  "tool": "pip-audit",
+  "type": "SCA",
+  "severity": "HIGH",
+  "id": "PYSEC-2023-74",
+  "package": "requests",
+  "installed_version": "2.19.1",
+  "fix_versions": ["2.31.0"]
+}
+Integração com o GitHub
 
-Gitleaks dedicado para secrets, Semgrep para regras SAST customizadas, comentário automático no PR com o resumo (via `actions/github-script`), suporte a `--format sarif` para integrar com a aba Security do GitHub, e versão para GitLab CI (`.gitlab-ci.yml`).
+O workflow roda em todo push e pull_request para a main, além de permitir execução manual pela aba Actions. O relatório é publicado como artefato com if: always(), garantindo que fique disponível justamente quando a build falha.
+
+Para transformar o check em obstáculo real ao merge, ative a proteção de branch em Settings → Branches → Add branch ruleset, exigindo o status check SAST + SCA Scan como obrigatório. Sem essa configuração o workflow ainda roda e reporta, mas o botão de merge continua liberado.
+
+Decisões de design
+
+pip-audit em vez de Safety. Consulta a base OSV e o PyPI Advisory Database, não exige chave de API e é mantido pela PyPA. O Safety passou a exigir conta para uso completo.
+
+Normalização de severidade. Cada ferramenta usa uma escala própria — o Bandit trabalha com LOW/MEDIUM/HIGH, o Trivy acrescenta CRITICAL e UNKNOWN, e o pip-audit não expõe severidade. O scanner unifica tudo em uma escala única antes de comparar com o limiar, e trata CVE sem severidade explícita como HIGH por postura conservadora.
+
+Exit code como contrato. O CI não precisa entender o formato do relatório: 0 aprova, 1 bloqueia. Isso desacopla o scanner da plataforma.
+
+Tolerância a ferramentas ausentes. Se uma ferramenta não está instalada, o scanner avisa e segue com as demais em vez de quebrar a pipeline inteira.
+
+Extensões possíveis
+
+Saída em formato SARIF para integrar com a aba Security do GitHub, comentário automático no PR com o resumo via actions/github-script, Semgrep para regras SAST customizadas, Gitleaks dedicado a segredos, e um .gitlab-ci.yml equivalente.
+
+Licença
+
+MIT
