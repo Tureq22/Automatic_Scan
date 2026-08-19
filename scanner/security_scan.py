@@ -128,7 +128,7 @@ def run_pip_audit(target_path: str) -> list[dict]:
         return []
 
     code, stdout, stderr = run_command(
-        ["pip-audit", "-r", req_file, "-f", "json", "--disable-pip"]
+        ["pip-audit", "-r", req_file, "-f", "json", "--no-deps"]
     )
 
     if code not in (0, 1):
@@ -157,7 +157,7 @@ def run_pip_audit(target_path: str) -> list[dict]:
                 "aliases": vuln.get("aliases", []),
             })
 
-    print(f" pip-audit find {len(findings)} issue(s)")
+    print(f" pip-audit encontrou {len(findings)} issue(s)")
     return findings
 
 
@@ -216,7 +216,7 @@ def run_trivy(target_path: str) -> list[dict]:
                 "line": secret.get("StartLine"),
             })
 
-    print(f" Truvy encontrou {len(findings)} issue(s)")
+    print(f" Trivy encontrou {len(findings)} issue(s)")
     return findings
 
 # Consolidação, relatório e decisão de build
@@ -243,7 +243,7 @@ def print_summary(findings: list[dict], summary: dict, fail_on: str) -> None:
     threshold = SEVERITY_ORDER[fail_on]
     blocking = [f for f in findings if SEVERITY_ORDER[f["severity"]] >= threshold]
     if blocking:
-        print(f"{BOLD}{RED}Vulnerabilidaes bloqueantes:{RESET}")
+        print(f"{BOLD}{RED}Vulnerabilidades bloqueantes:{RESET}")
         for f in blocking:
             location = f.get("file") or f.get("package") or f.gt("target") or "-"
             line = f":{f['line']}" if f.get("line") else ""
@@ -263,3 +263,53 @@ def write_report(findings: list[dict], summary: dict, output: str, fail_on: str,
     with open(output, "w", encoding="utf-8") as fh:
         json.dump(report, fh, indent=2, ensure_ascii=False)
     print(f"Relatorio salvo em: {output}")
+
+# main() - ponto de entrada: l~e argumentos, orquestra e decide o exit code
+
+def main() -> int:
+    parser = argparse.ArgumentParser(
+        description="Scanner de vulnerabilidades para pipelines CI/CD (SAST + SCA)"
+    )
+    parser.add_argument("--path", default=".",
+                        help="Diretório do projeto a analisar (default: .)")
+    parser.add_argument("--fail-on", default="HIGH",
+                        choices=["LOW", "MEDIUM", "HIGH", "CRITICAL"],
+                        help="Severidade mínima que falha a build (default: HIGH)")
+    parser.add_argument("--report", default="security_report.json",
+                        help="Arquivo de saida do relatório JSON")
+    parser.add_argument("--skip", nargs="*", default=[],
+                        choices=["bandit", "pip-audit", "trivy"],
+                        help="Ferramentas a pular")
+    args = parser.parse_args()
+
+    print(f"{BOLD} Iniciando análise de segurança em: {args.path}{RESET}\n")
+
+    findings: list[dict] = []
+    if "bandit" not in args.skip:
+        findings += run_bandit(args.path)
+    if "pip-audit" not in args.skip:
+        findings += run_pip_audit(args.path)
+    if "trivy" not in args.skip:
+        findings += run_trivy(args.path)
+
+    summary = summarize(findings)
+    threshold = SEVERITY_ORDER[args.fail_on]
+    blocking_count = sum(
+        count for sev, count in summary.items()
+        if SEVERITY_ORDER[sev] >= threshold
+    )
+    passed = blocking_count == 0
+
+    print_summary(findings, summary, args.fail_on)
+    write_report(findings, summary, args.report, args.fail_on, passed)
+
+    if not passed:
+        print(f"\n{RED}{BOLD}BUILD FALHOU: {blocking_count} vulnerabilidades "
+              f">= {args.fail_on} encontrada(s).{RESET}")
+        return 1
+    print(f"\n{GREEN}{BOLD}BUILD APROVADA: nenhuma vulnerabilidade "
+          f">= {args.fail_on}.{RESET}")
+    return 0
+
+if __name__ == "__main__":
+    sys.exit(main())
